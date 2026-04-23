@@ -1,0 +1,62 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Primitives
+    function isSignedIn() { return request.auth != null; }
+    function isOwner(userId) { return isSignedIn() && request.auth.uid == userId; }
+    function isEmailVerified() { return request.auth.token.email_verified == true; }
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+    function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
+
+    // Validation
+    function isValidUserCreate(data) {
+      return data.keys().hasAll(['email', 'createdAt', 'lastLoginAt']) &&
+             data.email is string && data.email.size() <= 200 &&
+             data.createdAt == request.time &&
+             data.lastLoginAt == request.time &&
+             (data.get('displayName', '') is string) &&
+             (data.get('photoURL', '') is string);
+    }
+
+    function isValidUserUpdate(data) {
+      return data.email == existing().email &&
+             data.createdAt == existing().createdAt &&
+             data.lastLoginAt == request.time &&
+             (data.get('displayName', '') is string) &&
+             (data.get('photoURL', '') is string);
+    }
+
+    function isValidScanCreate(data, userId) {
+      return data.keys().hasAll(['userId', 'imageUrl', 'condition', 'urgency', 'confidence', 'createdAt']) &&
+             data.userId == userId &&
+             data.imageUrl is string && data.imageUrl.size() <= 2000 &&
+             data.condition is string && data.condition.size() <= 200 &&
+             data.urgency is string && data.urgency.size() <= 50 &&
+             data.confidence is string && data.confidence.size() <= 50 &&
+             data.createdAt == request.time;
+    }
+
+    // Routes
+    match /users/{userId} {
+      allow get: if isValidId(userId) && isOwner(userId);
+      allow list: if false;
+      allow create: if isValidId(userId) && isOwner(userId) && isEmailVerified() && isValidUserCreate(incoming());
+      allow update: if isValidId(userId) && isOwner(userId) && isEmailVerified() && isValidUserUpdate(incoming()) && incoming().diff(existing()).affectedKeys().hasOnly(['lastLoginAt', 'displayName', 'photoURL']);
+      allow delete: if false;
+      
+      match /scans/{scanId} {
+        allow get: if isValidId(scanId) && isOwner(userId);
+        allow list: if isOwner(userId) && resource.data.userId == request.auth.uid;
+        allow create: if isValidId(scanId) && isOwner(userId) && isEmailVerified() && isValidScanCreate(incoming(), userId);
+        allow update: if false; // Scans are immutable
+        allow delete: if isValidId(scanId) && isOwner(userId);
+      }
+    }
+  }
+}

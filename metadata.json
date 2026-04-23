@@ -1,0 +1,6 @@
+{
+  "name": "Derma-AI",
+  "description": "AI-powered dermatology screening app using Gemini flash to analyze skin photos and assess urgency.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
