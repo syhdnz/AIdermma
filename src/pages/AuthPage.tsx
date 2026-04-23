@@ -118,6 +118,9 @@ export default function AuthPage() {
       setIsSubmitting(false);
       
       let errorMessage = error.message || 'Authentication failed. Please try again.';
+      if (error.code === 'auth/operation-not-allowed') {
+        errorMessage = 'Email/Password authentication is not enabled. Please enable it in your Firebase Console under Authentication -> Sign-in method.';
+      }
       alert(errorMessage);
     }
   };
@@ -147,6 +150,14 @@ export default function AuthPage() {
     } catch (error: any) {
       console.error(error);
       setIsSubmitting(false);
+      if (error.code === 'auth/popup-closed-by-user') {
+        // Just ignore it or show a mild message, do not alert a scary error
+        return;
+      }
+      if (error.code === 'auth/operation-not-allowed') {
+         alert('Google Sign-In is not enabled. Please enable it in your Firebase Console under Authentication -> Sign-in method.');
+         return;
+      }
       alert(error.message || 'Google Sign-In failed. Please try again.');
     }
   };

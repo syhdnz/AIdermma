@@ -776,15 +776,20 @@ export default function Dashboard() {
                 </motion.p>
               )}
             </AnimatePresence>
-            <button 
-              onClick={handleSignOut}
-              className="w-full px-[16px] py-[10px] font-[600] font-[var(--font-body)] text-[12px] text-white/90 border border-white/10 rounded-[8px] bg-white/5 shadow-[0_3px_0_0_rgba(0,0,0,0.4)] hover:shadow-[0_1px_0_0_rgba(0,0,0,0.4)] hover:translate-y-[2px] active:shadow-none active:translate-y-[3px] transition-all flex items-center justify-center gap-[8px] group"
-              onMouseEnter={() => setIsHovering(true)}
-              onMouseLeave={() => setIsHovering(false)}
-            >
-              <i className="fa-solid fa-arrow-right-from-bracket text-[10px] opacity-60 group-hover:opacity-100 transition-opacity"></i>
-              Sign Out
-            </button>
+            <div className="fancy-button-wrap w-full mt-[12px]">
+              <button 
+                onClick={handleSignOut}
+                className="fancy-button fancy-button-sm w-full"
+                onMouseEnter={() => setIsHovering(true)}
+                onMouseLeave={() => setIsHovering(false)}
+              >
+                <span>
+                  <i className="fa-solid fa-arrow-right-from-bracket text-[10px]"></i>
+                  Sign Out
+                </span>
+              </button>
+              <div className="fancy-button-shadow"></div>
+            </div>
           </div>
         </aside>
 
@@ -915,17 +920,20 @@ export default function Dashboard() {
                         {isDragging ? 'Drop files here' : 'Upload or Drag & Drop skin photos'}
                       </h2>
                       <p className="text-[14px] text-[var(--ink-2)] mb-[32px] opacity-70">Multiple images allowed for better diagnostic accuracy</p>
-                      <motion.button 
-                        whileHover={{ scale: 1.05, y: -4 }}
-                        whileTap={{ scale: 0.98 }}
-                        onClick={handleUploadClick}
-                        className="bg-[var(--teal)] text-white px-[48px] py-[20px] rounded-full font-[600] font-[var(--font-body)] text-[16px] shadow-[0_20px_40px_rgba(45,156,155,0.2)] hover:shadow-[0_25px_50px_rgba(45,156,155,0.3)] transition-all flex items-center gap-[12px] group"
-                        onMouseEnter={() => setIsHovering(true)}
-                        onMouseLeave={() => setIsHovering(false)}
-                      >
-                        <span className="tracking-[0.02em]">Select Photos</span>
-                        <i className="fa-solid fa-cloud-arrow-up text-[14px] group-hover:translate-y-[-2px] transition-transform duration-300"></i>
-                      </motion.button>
+                      <div className="fancy-button-wrap inline-block w-auto">
+                        <button 
+                          onClick={handleUploadClick}
+                          className="fancy-button"
+                          onMouseEnter={() => setIsHovering(true)}
+                          onMouseLeave={() => setIsHovering(false)}
+                        >
+                          <span>
+                            <span className="tracking-[0.02em]">Select Photos</span>
+                            <i className="fa-solid fa-cloud-arrow-up text-[14px]"></i>
+                          </span>
+                        </button>
+                        <div className="fancy-button-shadow"></div>
+                      </div>
                     </>
                   )}
                   
@@ -1041,13 +1049,18 @@ export default function Dashboard() {
                        <p className="text-[13px] text-[var(--ink-3)]">Your future sessions will appear here.</p>
                     </div>
                   )}
-                  <button 
-                    onClick={() => handleUploadClick()}
-                    className="w-full py-[12px] border-2 border-dashed border-[var(--teal)]/30 text-[var(--teal)] text-[13px] font-[600] rounded-[8px] hover:bg-[var(--teal)]/5 transition-all flex items-center justify-center gap-[8px]"
-                  >
-                    <i className="fa-solid fa-plus text-[12px]"></i>
-                    Start a New Session
-                  </button>
+                  <div className="fancy-button-wrap w-full mt-[12px]">
+                    <button 
+                      onClick={() => handleUploadClick()}
+                      className="fancy-button fancy-button-sm w-full"
+                    >
+                      <span>
+                        <i className="fa-solid fa-plus text-[12px]"></i>
+                        Start a New Session
+                      </span>
+                    </button>
+                    <div className="fancy-button-shadow"></div>
+                  </div>
                 </div>
                 </div>
               </motion.div>
