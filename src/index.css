@@ -6,6 +6,9 @@
   --color-ink-2: var(--ink-2);
   --color-ink-3: var(--ink-3);
   
+  --font-display: 'Cormorant Garamond', serif;
+  --font-body: 'DM Sans', sans-serif;
+  
   --animate-scan: scan 2s ease-in-out infinite;
   
   @keyframes scan {

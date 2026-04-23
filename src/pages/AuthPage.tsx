@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { signInWithGoogle, resetPassword } from '../lib/firebase';
+import { auth, googleProvider } from '../lib/firebase';
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signInWithPopup, sendPasswordResetEmail, updateProfile, onAuthStateChanged } from 'firebase/auth';
+import { supabase } from '../lib/supabase';
 
 export default function AuthPage() {
   const [activeTab, setActiveTab] = useState<'login' | 'register'>('login');
@@ -22,6 +24,16 @@ export default function AuthPage() {
   const containerRef = useRef<HTMLDivElement>(null);
 
   const navigate = useNavigate();
+
+  useEffect(() => {
+    // If user is already logged in, send them to dashboard
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        navigate('/dashboard');
+      }
+    });
+    return () => unsubscribe();
+  }, [navigate]);
 
   const handleBackClick = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -85,32 +97,27 @@ export default function AuthPage() {
         if (password !== confirmPassword) {
           throw new Error("Passwords do not match");
         }
-        const { signUpWithEmail } = await import('../lib/firebase');
-        await signUpWithEmail(email, password, name);
+        const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+        await updateProfile(userCredential.user, {
+          displayName: name
+        });
+        
+        setIsSubmitting(false);
+        setShowSuccess(true);
+        setTimeout(() => navigate('/dashboard'), 1500);
       } else {
-        const { signInWithEmail } = await import('../lib/firebase');
-        await signInWithEmail(email, password);
+        await signInWithEmailAndPassword(auth, email, password);
+        setIsSubmitting(false);
+        setShowSuccess(true);
+        setTimeout(() => {
+          navigate('/dashboard');
+        }, 1500);
       }
-      setIsSubmitting(false);
-      setShowSuccess(true);
-      setTimeout(() => {
-        navigate('/dashboard');
-      }, 1500);
     } catch (error: any) {
-      console.error(error);
+      console.error("Auth error details:", error);
       setIsSubmitting(false);
       
-      let errorMessage = 'Authentication failed. Please try again.';
-      if (error.code === 'auth/operation-not-allowed') {
-        errorMessage = 'Email/Password authentication is not enabled in Firebase right now. Please enable it in your Firebase Console.';
-      } else if (error.code === 'auth/weak-password') {
-        errorMessage = 'Firebase: Password should be at least 6 characters.';
-      } else if (error.code === 'auth/email-already-in-use') {
-        errorMessage = 'That email address is already in use.';
-      } else if (error.code === 'auth/invalid-credential') {
-        errorMessage = 'Invalid email or password.';
-      }
-      
+      let errorMessage = error.message || 'Authentication failed. Please try again.';
       alert(errorMessage);
     }
   };
@@ -122,7 +129,7 @@ export default function AuthPage() {
       return;
     }
     try {
-      await resetPassword(email);
+      await sendPasswordResetEmail(auth, email);
       setResetSent(true);
       setIsSubmitting(false);
     } catch (error: any) {
@@ -135,16 +142,12 @@ export default function AuthPage() {
   const handleGoogleSignIn = async () => {
     try {
       setIsSubmitting(true);
-      await signInWithGoogle();
-      setIsSubmitting(false);
-      setShowSuccess(true);
-      setTimeout(() => {
-        navigate('/dashboard'); // Assuming you want a dashboard; adjust if needed
-      }, 1500);
-    } catch (error) {
+      await signInWithPopup(auth, googleProvider);
+      navigate('/dashboard');
+    } catch (error: any) {
       console.error(error);
       setIsSubmitting(false);
-      alert('Google Sign-In failed. Please try again.');
+      alert(error.message || 'Google Sign-In failed. Please try again.');
     }
   };
 
