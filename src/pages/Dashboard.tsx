@@ -4,7 +4,8 @@ import { supabase } from '../lib/supabase';
 import { auth } from '../lib/firebase';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { GoogleGenAI, Type } from '@google/genai';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
+import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip } from 'recharts';
 
 import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
@@ -46,9 +47,83 @@ interface ScanRecord {
   analysis?: AnalysisResult;
 }
 
+const INDIAN_CITIES = [
+  "Mumbai", "Delhi", "Bengaluru", "Hyderabad", "Ahmedabad", "Chennai",
+  "Kolkata", "Surat", "Pune", "Jaipur", "Lucknow", "Kanpur", "Nagpur",
+  "Indore", "Thane", "Bhopal", "Visakhapatnam", "Pimpri-Chinchwad",
+  "Patna", "Vadodara"
+];
+
+function CityDropdown({ value, onChange, isHeader = false }: { value: string, onChange: (val: string) => void, isHeader?: boolean }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  return (
+    <div className="relative inline-block text-left" ref={dropdownRef}>
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        className={isHeader 
+          ? "text-[var(--teal)] bg-transparent font-[600] underline outline-none cursor-pointer appearance-none px-0 py-0 text-[12px] flex items-center gap-[4px]"
+          : "text-[13px] font-[500] text-[var(--ink)] bg-transparent border-b border-dashed border-[var(--ink-3)] focus:border-solid focus:border-[var(--teal)] focus:outline-none w-[140px] text-right cursor-pointer flex justify-between items-center pb-[2px]"
+        }
+      >
+        <span className={isHeader ? "" : "flex-1 text-right"}>{value}</span>
+        <i className={`fa-solid fa-chevron-down text-[10px] transition-transform ${isOpen ? 'rotate-180' : ''}`}></i>
+      </button>
+
+      {isOpen && (
+        <motion.div
+          initial={{ opacity: 0, y: -10, scaleY: 0.95 }}
+          animate={{ opacity: 1, y: 0, scaleY: 1 }}
+          transition={{ duration: 0.15, ease: "easeOut" }}
+          className={`absolute z-[100] ${isHeader ? 'left-0 mt-[8px]' : 'right-0 mt-[8px]'} w-[180px] origin-top bg-[#FCFAF7] border border-[var(--border-light)] rounded-[8px] shadow-[0_12px_24px_-8px_rgba(0,0,0,0.15)] overflow-hidden`}
+        >
+          <div className="max-h-[240px] overflow-y-auto custom-scrollbar py-[8px]">
+            {INDIAN_CITIES.map((city) => (
+              <button
+                key={city}
+                onClick={() => {
+                  onChange(city);
+                  setIsOpen(false);
+                }}
+                className={`w-full text-left px-[16px] py-[8px] text-[13px] transition-colors ${value === city ? 'bg-[var(--teal)]/10 text-[var(--teal)] font-[600]' : 'text-[var(--ink-2)] hover:bg-[var(--bg-light)] font-[500] hover:text-[var(--ink)]'}`}
+              >
+                {city}
+                {value === city && <i className="fa-solid fa-check float-right mt-[3px] text-[10px]"></i>}
+              </button>
+            ))}
+          </div>
+        </motion.div>
+      )}
+    </div>
+  );
+}
+
 export default function Dashboard() {
   const [user, setUser] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
+  const [authResolved, setAuthResolved] = useState(false);
+  const [minWaitDone, setMinWaitDone] = useState(false);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setMinWaitDone(true);
+    }, 1200);
+    return () => clearTimeout(timer);
+  }, []);
+
+  const showLoader = loading || !minWaitDone || !authResolved;
+
   const [activeTab, setActiveTab] = useState('Dashboard');
   const [selectedSessionDate, setSelectedSessionDate] = useState<string | null>(null);
   
@@ -64,6 +139,9 @@ export default function Dashboard() {
   const [isEmailPrivate, setIsEmailPrivate] = useState(true);
   const [fitzpatrickType, setFitzpatrickType] = useState<string>('Type IV (Light Brown)');
   const [userCity, setUserCity] = useState<string>('Mumbai'); // Default to a major Indian city
+  const [isHistorySaving, setIsHistorySaving] = useState(true);
+  const [isNotifications, setIsNotifications] = useState(true);
+  const [showTOS, setShowTOS] = useState(false);
   const reportTemplateRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
@@ -89,6 +167,7 @@ export default function Dashboard() {
       } else {
         setUser(firebaseUser);
         setLoading(false);
+        setAuthResolved(true);
         fetchScans(firebaseUser.uid);
       }
     });
@@ -180,6 +259,72 @@ export default function Dashboard() {
     if (isScanning) return;
     fileInputRef.current?.click();
   };
+
+  const handleDeleteScan = async (e: React.MouseEvent, scanId: string) => {
+    // Already handled stopPropagation in the component
+    if (!window.confirm("Are you sure you want to delete this scan permanently?")) return;
+
+    try {
+      // 1. Get scan details first to find image paths
+      const { data: scanData } = await supabase
+        .from('scans')
+        .select('*')
+        .eq('id', scanId)
+        .single();
+
+      if (scanData) {
+        const urlsToDelete: string[] = [];
+        if (scanData.analysis?.all_image_urls) {
+          urlsToDelete.push(...scanData.analysis.all_image_urls);
+        } else if (scanData.image_url) {
+          urlsToDelete.push(scanData.image_url);
+        }
+
+        // 2. Delete from Storage
+        const pathsToDelete = urlsToDelete.map(url => {
+          const parts = url.split('/scans/');
+          return parts.length > 1 ? parts[1] : null;
+        }).filter(p => p !== null) as string[];
+
+        if (pathsToDelete.length > 0) {
+          await supabase.storage
+            .from('scans')
+            .remove(pathsToDelete);
+        }
+      }
+
+      // 3. Delete from Database
+      const { error } = await supabase
+        .from('scans')
+        .delete()
+        .eq('id', scanId);
+
+      if (error) throw error;
+      
+      // Update local state
+      setScans(prev => {
+        const nextScans = prev.filter(s => s.id !== scanId);
+        
+        // If we are in a session view, check if it's now empty
+        if (selectedSessionDate) {
+          const hasRemainingInSession = nextScans.some(s => 
+            (s.createdAt ? new Date(s.createdAt).toLocaleDateString() : 'Today') === selectedSessionDate
+          );
+          if (!hasRemainingInSession) {
+            setSelectedSessionDate(null);
+          }
+        }
+        
+        return nextScans;
+      });
+      
+    } catch (err) {
+      console.error("Delete failed:", err);
+      alert("Failed to delete record.");
+    }
+  };
+
+
 
   const processFiles = async (files: FileList | null) => {
     if (!files || files.length === 0 || !user) return;
@@ -347,10 +492,32 @@ export default function Dashboard() {
     processFiles(e.dataTransfer.files);
   };
 
-  if (loading) {
+  if (showLoader) {
     return (
-      <div className="min-h-screen bg-[var(--bg-base)] flex items-center justify-center">
-        <p className="font-[var(--font-body)] text-[var(--ink-2)] text-[14px]">Verifying secure session...</p>
+      <div className="fixed inset-0 z-[9999] bg-[var(--bg-dark)] flex flex-col items-center justify-center font-[var(--font-display)]">
+        <div className="absolute top-[50%] left-[50%] translate-x-[-50%] translate-y-[-50%] flex flex-col items-center">
+          <div className="text-[var(--paper-text)] text-[32px] md:text-[56px] font-[700] tracking-tight">
+            Authenticating
+            <motion.span 
+              animate={{ opacity: [0, 1, 0] }}
+              transition={{ duration: 1.5, repeat: Infinity, ease: "easeInOut" }}
+              className="text-[var(--teal-light)]"
+            >
+              .
+            </motion.span>
+          </div>
+          <div className="w-[160px] md:w-[240px] h-[2px] bg-[rgba(255,255,255,0.05)] mt-[36px] overflow-hidden relative rounded-full">
+            <motion.div 
+              className="absolute top-0 left-0 bottom-0 bg-[var(--teal-light)] rounded-full"
+              initial={{ left: "-100%", width: "50%" }}
+              animate={{ left: "200%" }}
+              transition={{ duration: 1.5, repeat: Infinity, ease: "easeInOut" }}
+            />
+          </div>
+          <div className="text-[var(--paper-muted)] font-[var(--font-body)] text-[11px] tracking-[0.3em] uppercase mt-[20px] mix-blend-screen">
+            Decrypting User Profile
+          </div>
+        </div>
       </div>
     );
   }
@@ -435,6 +602,8 @@ export default function Dashboard() {
                 <div className="text-right">
                   <p className="font-[700] text-[12px] uppercase tracking-[0.1em] text-[var(--teal)]">Patient ID</p>
                   <p className="font-[500] text-[14px]">{user?.uid?.slice(0, 12)}...</p>
+                  <p className="font-[700] text-[12px] uppercase tracking-[0.1em] text-[var(--teal)] mt-[12px]">Location</p>
+                  <p className="font-[500] text-[14px]">{userCity}</p>
                   <p className="font-[700] text-[12px] uppercase tracking-[0.1em] text-[var(--teal)] mt-[12px]">Generated On</p>
                   <p className="font-[500] text-[14px]">{new Date().toLocaleString()}</p>
                 </div>
@@ -459,7 +628,7 @@ export default function Dashboard() {
                       <div className="col-span-2 aspect-square rounded-[8px] overflow-hidden border border-[var(--border-light)] shadow-inner flex items-center justify-center text-[var(--ink-3)] bg-white">No Image</div>
                     )}
                   </div>
-                  <div className="p-[16px] bg-white border border-[var(--border-light)] rounded-[8px]">
+                  <div className="p-[16px] bg-white/40 backdrop-blur-md border border-white/60 rounded-[8px] shadow-sm">
                     <p className="text-[10px] uppercase font-[700] text-[var(--ink-3)] mb-[4px]">Fitzpatrick Category</p>
                     <p className="text-[14px] font-[600] text-[var(--teal)]">{scanResult.fitzpatrickScale}</p>
                   </div>
@@ -499,7 +668,7 @@ export default function Dashboard() {
 
               {/* Recommendations & Management */}
               <div className="grid grid-cols-2 gap-[32px] mb-[48px]">
-                <div className="p-[24px] bg-white border border-[var(--border-light)] rounded-[12px]">
+                <div className="p-[24px] bg-white/40 backdrop-blur-md border border-white/60 rounded-[12px] shadow-sm">
                   <h3 className="text-[12px] uppercase font-[700] text-[var(--ink)] mb-[16px] flex items-center gap-[8px]">
                     <i className="fa-solid fa-notes-medical text-[var(--teal)]"></i>
                     Care & Management
@@ -593,10 +762,20 @@ export default function Dashboard() {
             ))}
           </nav>
 
-          <div className="mt-auto pt-[32px] border-t border-[var(--border-dark)]">
-            <p className="font-[400] font-[var(--font-body)] text-[12.5px] text-[var(--paper-muted)] truncate mb-[20px] block px-[4px] transition-all duration-500">
-              {isEmailPrivate ? '••••••••••••••••' : user?.email}
-            </p>
+          <div className="mt-auto pt-[32px] border-t border-[var(--border-dark)] overflow-hidden">
+            <AnimatePresence>
+              {!isEmailPrivate && user?.email && (
+                <motion.p 
+                  initial={{ height: 0, opacity: 0, marginBottom: 0 }}
+                  animate={{ height: "auto", opacity: 1, marginBottom: 20 }}
+                  exit={{ height: 0, opacity: 0, marginBottom: 0 }}
+                  transition={{ duration: 0.3, ease: "easeInOut" }}
+                  className="font-[400] font-[var(--font-body)] text-[12.5px] text-[var(--paper-muted)] truncate block px-[4px]"
+                >
+                  {user.email}
+                </motion.p>
+              )}
+            </AnimatePresence>
             <button 
               onClick={handleSignOut}
               className="w-full px-[16px] py-[10px] font-[600] font-[var(--font-body)] text-[12px] text-white/90 border border-white/10 rounded-[8px] bg-white/5 shadow-[0_3px_0_0_rgba(0,0,0,0.4)] hover:shadow-[0_1px_0_0_rgba(0,0,0,0.4)] hover:translate-y-[2px] active:shadow-none active:translate-y-[3px] transition-all flex items-center justify-center gap-[8px] group"
@@ -631,9 +810,9 @@ export default function Dashboard() {
               {/* ROW 1: CALIBRATION & STATS */}
               <motion.div 
                 initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6, delay: 0.1 }}
-                className="grid grid-cols-1 md:grid-cols-4 gap-[24px] mb-[48px]"
+                className="grid grid-cols-1 md:grid-cols-4 gap-[24px] mb-[48px] relative z-[60]"
               >
-                <div className="bg-white/40 backdrop-blur-md border border-white/60 shadow-sm p-[24px] border-t-[3px] border-t-[var(--teal)] rounded-b-[4px] md:col-span-2">
+                <div className="relative z-[60] bg-white/40 backdrop-blur-md border border-white/60 shadow-sm p-[24px] border-t-[3px] border-t-[var(--teal)] rounded-b-[4px] md:col-span-2 transition-all duration-300 hover:shadow-[0_20px_40px_rgba(0,0,0,0.08)] hover:-translate-y-1">
                   <div className="flex justify-between items-start mb-[16px]">
                     <div>
                       <p className="font-[500] font-[var(--font-body)] text-[11px] text-[var(--ink-3)] uppercase tracking-[0.05em] mb-[4px]">Fitzpatrick Baseline</p>
@@ -663,17 +842,14 @@ export default function Dashboard() {
                   </div>
                   <div className="flex justify-between items-center text-[12px]">
                     <span className="text-[var(--ink-2)]">Current: <strong>{fitzpatrickType}</strong></span>
-                    <button 
-                      onClick={() => {
-                        const city = prompt("Enter your city for specialist search:", userCity);
-                        if (city) setUserCity(city);
-                      }}
-                      className="text-[var(--teal)] font-[600] underline"
-                      onMouseEnter={() => setIsHovering(true)}
-                      onMouseLeave={() => setIsHovering(false)}
-                    >
-                      Loc: {userCity}
-                    </button>
+                        <div className="flex items-center gap-[4px] mt-[4px]">
+                      <span className="text-[var(--ink-2)] text-[12px]">Loc:</span>
+                      <CityDropdown 
+                        value={userCity} 
+                        onChange={(val) => setUserCity(val)} 
+                        isHeader={true} 
+                      />
+                    </div>
                   </div>
                 </div>
 
@@ -681,7 +857,7 @@ export default function Dashboard() {
                   { label: 'Total Scans', value: scans.length.toString() },
                   { label: 'Urgent Flags', value: scans.filter(s => s.urgency?.toLowerCase() === 'high').length.toString() }
                 ].map((stat, idx) => (
-                  <div key={idx} className="bg-white/40 backdrop-blur-md border border-white/60 shadow-sm p-[24px] border-t-[3px] border-t-[var(--teal)] rounded-b-[4px]">
+                  <div key={idx} className="relative z-10 bg-white/40 backdrop-blur-md border border-white/60 shadow-sm p-[24px] border-t-[3px] border-t-[var(--teal)] rounded-b-[4px] transition-all duration-300 hover:shadow-[0_20px_40px_rgba(0,0,0,0.08)] hover:-translate-y-1">
                     <p className="font-[500] font-[var(--font-body)] text-[12px] text-[var(--ink-3)] uppercase tracking-[0.05em] mb-[12px]">{stat.label}</p>
                     <p className="font-[600] font-[var(--font-display)] text-[32px] text-[var(--ink)] leading-[1]">{stat.value}</p>
                   </div>
@@ -697,7 +873,7 @@ export default function Dashboard() {
                   onDragOver={handleDragOver}
                   onDragLeave={handleDragLeave}
                   onDrop={handleDrop}
-                  className={`bg-white/40 backdrop-blur-xl border-2 border-dashed rounded-[4px] p-[64px_32px] text-center flex flex-col items-center justify-center transition-all duration-500 ${isDragging ? 'border-[var(--teal)] bg-[var(--teal)]/5' : 'border-[var(--teal)]/50'} hover:bg-white/60`}
+                  className={`bg-white/40 backdrop-blur-xl border-2 border-dashed rounded-[4px] p-[64px_32px] text-center flex flex-col items-center justify-center transition-all duration-500 ${isDragging ? 'border-[var(--teal)] bg-[var(--teal)]/5' : 'border-[var(--teal)]/50'} hover:bg-white/60 hover:shadow-[0_20px_40px_rgba(0,0,0,0.08)] hover:-translate-y-1`}
                 >
                   {isScanning ? (
                     <div className="flex flex-col items-center w-full max-w-md mx-auto">
@@ -771,30 +947,64 @@ export default function Dashboard() {
               >
                 <div className="lg:col-span-2">
                   <h3 className="font-[600] font-[var(--font-display)] text-[24px] text-[var(--ink)] mb-[24px]">Progression Timeline</h3>
-                  <div className="bg-white/40 backdrop-blur-md border border-white/60 shadow-sm rounded-[4px] p-[24px]">
+                  <div className="bg-white/40 backdrop-blur-md border border-white/60 shadow-sm rounded-[8px] p-[32px] hover:-translate-y-1 hover:shadow-[0_20px_40px_rgba(0,0,0,0.08)] transition-all duration-300">
                     {scans.length > 1 ? (
-                      <div className="space-y-[20px]">
-                        <div className="flex justify-between items-center mb-[16px]">
+                      <div className="space-y-[24px]">
+                        <div className="flex justify-between items-center">
                           <p className="text-[13px] text-[var(--ink-2)]">Tracking condition changes across <strong>{scans.length} sessions</strong>.</p>
-                          <span className="text-[var(--teal)] text-[12px] font-[600] bg-[var(--teal)]/5 px-[8px] py-[2px] rounded">Active Monitor</span>
+                          <span className="text-[var(--teal)] text-[11px] font-[700] uppercase tracking-wider bg-[var(--teal)]/10 px-[12px] py-[4px] rounded-full">Active Monitor</span>
                         </div>
-                        <div className="relative h-[2px] bg-[var(--teal)]/10 my-[32px]">
-                          <div className="absolute top-[-4px] left-0 right-0 flex justify-between">
+                        <div className="relative h-[2px] bg-[var(--border-light)] mt-[48px] mb-[64px] mx-[20px]">
+                          <div className="absolute top-[-5px] left-0 right-0 flex justify-between">
                             {scans.slice(0, 5).reverse().map((s, i) => (
-                              <div key={i} className="flex flex-col items-center group">
-                                <div className="w-[10px] h-[10px] rounded-full bg-[var(--teal)] border-2 border-white shadow-sm mb-[8px]"></div>
-                                <span className="text-[10px] text-[var(--ink-3)] rotate-[-45deg] origin-right translate-x-3">{new Date(s.createdAt).toLocaleDateString(undefined, {month: 'short', day: 'numeric'})}</span>
+                              <div key={i} className="flex flex-col items-center group relative">
+                                <div className="w-[12px] h-[12px] rounded-full bg-white border-[3px] border-[var(--teal)] shadow-sm group-hover:scale-125 transition-transform z-10"></div>
+                                <span className="absolute top-[20px] text-[11px] text-[var(--ink-2)] font-[600] text-center w-[60px]">{new Date(s.createdAt).toLocaleDateString(undefined, {month: 'short', day: 'numeric'})}</span>
                               </div>
                             ))}
                           </div>
                         </div>
-                        <p className="text-[13px] text-[var(--ink-2)] mt-[40px] italic">
-                          AI Observation: {scans[0]?.analysis?.progressionNotes || 'Stable condition observed. Continue monitoring weekly.'}
-                        </p>
+                        
+                        <div className="bg-[var(--bg-light)] p-[16px] rounded-[6px] mt-[64px]">
+                           <p className="text-[14px] text-[var(--ink)] font-[500] leading-relaxed">
+                             <strong className="text-[var(--teal)]">AI Observation:</strong> {scans[0]?.analysis?.progressionNotes || 'Stable condition observed. Continue monitoring weekly.'}
+                           </p>
+                        </div>
+                        
+                        {/* Interactive Graph Section */}
+                        <div className="mt-[48px] h-[200px] w-full">
+                          <ResponsiveContainer width="100%" height="100%">
+                            <LineChart data={scans.slice(0, 5).reverse().map(s => ({
+                              date: new Date(s.createdAt).toLocaleDateString(undefined, {month: 'short', day: 'numeric'}),
+                              severity: s.analysis?.urgency === 'High' ? 80 : s.analysis?.urgency === 'Medium' ? 50 : 20
+                            }))}>
+                              <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: 'var(--ink-3)' }} dy={10} />
+                              <YAxis hide domain={[0, 100]} />
+                              <Tooltip 
+                                contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,0.1)' }}
+                                itemStyle={{ color: 'var(--teal)', fontWeight: '600' }}
+                                labelStyle={{ color: 'var(--ink-2)', fontSize: '12px', marginBottom: '4px' }}
+                              />
+                              <Line 
+                                type="monotone" 
+                                dataKey="severity" 
+                                stroke="var(--teal)" 
+                                strokeWidth={3} 
+                                dot={{ fill: 'var(--teal)', strokeWidth: 2, r: 4 }} 
+                                activeDot={{ r: 6, fill: 'white', stroke: 'var(--teal)', strokeWidth: 3 }}
+                                animationDuration={1500}
+                              />
+                            </LineChart>
+                          </ResponsiveContainer>
+                        </div>
                       </div>
                     ) : (
-                      <div className="py-[48px] text-center border border-dashed border-[var(--border-light)]">
-                         <p className="text-[14px] text-[var(--ink-3)]">History tracking requires at least 2 sessions.</p>
+                      <div className="py-[64px] text-center border-2 border-dashed border-[var(--border-light)] rounded-[8px] bg-[var(--bg-light)]">
+                         <div className="w-[48px] h-[48px] mx-auto rounded-full bg-[var(--teal)]/10 flex items-center justify-center mb-[16px]">
+                           <i className="fa-solid fa-chart-line text-[20px] text-[var(--teal)]"></i>
+                         </div>
+                         <p className="text-[14px] text-[var(--ink-2)] font-[500] mb-[8px]">Insufficient Data</p>
+                         <p className="text-[13px] text-[var(--ink-3)] max-w-[250px] mx-auto">History tracking and progression graphs require at least 2 analysis sessions.</p>
                       </div>
                     )}
                   </div>
@@ -810,7 +1020,7 @@ export default function Dashboard() {
                         setActiveTab('My History');
                         setSelectedSessionDate(date);
                       }}
-                      className="w-full text-left bg-white/40 backdrop-blur-md border border-white/60 p-[20px] rounded-[8px] hover:bg-white/60 transition-all flex items-center justify-between group shadow-sm"
+                      className="w-full text-left bg-white/40 backdrop-blur-md border border-white/60 p-[20px] rounded-[8px] hover:bg-white/60 transition-all duration-300 flex items-center justify-between group shadow-sm hover:shadow-[0_20px_40px_rgba(0,0,0,0.08)] hover:-translate-y-1"
                       onMouseEnter={() => setIsHovering(true)}
                       onMouseLeave={() => setIsHovering(false)}
                     >
@@ -914,44 +1124,48 @@ export default function Dashboard() {
                   <h3 className="font-[600] font-[var(--font-display)] text-[24px] text-[var(--ink)] mb-[32px]">Session findings for {selectedSessionDate}</h3>
                   <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-[20px]">
                     {scans.filter(s => (s.createdAt ? new Date(s.createdAt).toLocaleDateString() : 'Today') === selectedSessionDate).map((scan) => (
-                      <motion.button
-                        key={scan.id}
-                        initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }}
-                        onClick={() => {
-                          if (scan.analysis) {
-                            setScanResult(scan.analysis);
-                            if (scan.analysis.all_image_urls) {
-                              setPreviewUrls(scan.analysis.all_image_urls);
+                      <div key={scan.id} className="relative group">
+                        <motion.div
+                          initial={{ opacity: 0, scale: 0.9 }} 
+                          animate={{ opacity: 1, scale: 1 }}
+                          onClick={() => {
+                            if (scan.analysis) {
+                              setScanResult(scan.analysis);
+                              if (scan.analysis.all_image_urls) {
+                                setPreviewUrls(scan.analysis.all_image_urls);
+                              } else {
+                                setPreviewUrls([scan.imageUrl]);
+                              }
                             } else {
+                              setScanResult({ 
+                                condition: scan.condition, 
+                                urgency: scan.urgency, 
+                                confidence: scan.confidence,
+                                keyInsights: [scan.urgency] as any,
+                                managementPlan: ['Consult clinical specialist'] as any,
+                                dermatologistAdvice: 'Consult a dermatologist.',
+                                fitzpatrickScale: 'Not Calibrated',
+                                differentials: [],
+                                progressionNotes: 'Report generated without advanced analysis.',
+                                precautions: [],
+                                recommendations: [],
+                                suggestedMeds: 'Consult expert.'
+                              } as any);
                               setPreviewUrls([scan.imageUrl]);
                             }
-                          } else {
-                            setScanResult({ 
-                              condition: scan.condition, 
-                              urgency: scan.urgency, 
-                              confidence: scan.confidence,
-                              differentials: [],
-                              progressionNotes: 'Full report not available for legacy scans.',
-                              precautions: [],
-                              recommendations: [],
-                              suggestedMeds: 'Consult a dermatologist.',
-                              dermatologistAdvice: 'Consult a dermatologist.',
-                              fitzpatrickScale: 'Not Calibrated'
-                            });
-                            setPreviewUrls([scan.imageUrl]);
-                          }
-                          setShowResultModal(true);
-                        }}
-                        className="group relative aspect-square rounded-[4px] overflow-hidden border border-white/60 shadow-sm"
-                        onMouseEnter={() => setIsHovering(true)}
-                        onMouseLeave={() => setIsHovering(false)}
-                      >
-                        <img src={scan.imageUrl} alt="scan" className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" />
-                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center p-[16px]">
-                           <span className="text-white font-[600] text-[11px] uppercase tracking-[0.05em] text-center mb-[4px]">{scan.condition}</span>
-                           <span className="text-white/80 font-[400] text-[10px] uppercase">{scan.urgency}</span>
-                        </div>
-                      </motion.button>
+                            setShowResultModal(true);
+                          }}
+                          className="aspect-square rounded-[12px] overflow-hidden border border-white/60 shadow-sm cursor-pointer relative"
+                          onMouseEnter={() => setIsHovering(true)}
+                          onMouseLeave={() => setIsHovering(false)}
+                        >
+                          <img src={scan.imageUrl} alt="scan" className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" />
+                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center p-[16px] pointer-events-none">
+                             <span className="text-white font-[700] text-[13px] uppercase tracking-[0.05em] text-center mb-[4px]">{scan.condition}</span>
+                             <span className="text-white/80 font-[400] text-[11px] uppercase">{scan.urgency}</span>
+                          </div>
+                        </motion.div>
+                      </div>
                     ))}
                   </div>
                 </div>
@@ -972,91 +1186,66 @@ export default function Dashboard() {
 
                <div className="grid grid-cols-1 md:grid-cols-2 gap-[24px]">
                  {/* ACCOUNT SECTION */}
-                 <motion.div 
-                   whileHover={{ 
-                     y: -12, 
-                     scale: 1.02,
-                     rotateX: 2,
-                     rotateY: 2,
-                     transition: { duration: 0.3, ease: "easeOut" }
-                   }}
-                   style={{ perspective: 1000 }}
-                   className="bg-white/40 backdrop-blur-md border border-white/60 p-[32px] rounded-[8px] flex flex-col gap-[24px] shadow-sm hover:shadow-[0_20px_40px_rgba(0,0,0,0.12)] transition-all"
-                 >
-                    <div className="flex items-center gap-[12px] pb-[16px] border-b border-white/40">
+                 <div className="relative z-[60] bg-white/40 backdrop-blur-md border border-white/60 p-[32px] rounded-[8px] flex flex-col gap-[24px] shadow-sm hover:shadow-[0_20px_40px_rgba(0,0,0,0.08)] hover:-translate-y-1 transition-all duration-300">
+                    <div className="flex items-center gap-[12px] pb-[16px] border-b border-[var(--border-light)]">
                       <i className="fa-solid fa-user-circle text-[20px] text-[var(--teal)]"></i>
                       <h3 className="font-[600] text-[16px] text-[var(--ink)]">Account Preferences</h3>
                     </div>
                     <div className="space-y-[16px]">
                       <div className="flex justify-between items-center">
-                        <span className="text-[13px] text-[var(--ink-2)]">Email visibility</span>
-                        <button 
-                          onClick={() => setIsEmailPrivate(!isEmailPrivate)}
-                          className={`px-[10px] py-[4px] rounded-full text-[10px] font-[700] uppercase tracking-[0.05em] transition-all ${isEmailPrivate ? 'bg-[var(--teal)]/10 text-[var(--teal)]' : 'bg-orange-500/10 text-orange-600'}`}
-                          onMouseEnter={() => setIsHovering(true)}
-                          onMouseLeave={() => setIsHovering(false)}
-                        >
-                          {isEmailPrivate ? 'Private' : 'Public'}
-                        </button>
+                        <span className="text-[13px] text-[var(--ink-2)]">Location</span>
+                        <CityDropdown 
+                          value={userCity} 
+                          onChange={(val) => setUserCity(val)} 
+                        />
                       </div>
-                      <button 
-                        className="w-full py-[10px] border border-[var(--teal)]/30 text-[var(--teal)] text-[12px] font-[600] rounded-[4px] hover:bg-[var(--teal)]/5 transition-colors"
-                        onMouseEnter={() => setIsHovering(true)}
-                        onMouseLeave={() => setIsHovering(false)}
-                      >
-                        Change Password
-                      </button>
+                      <div className="flex justify-between items-center">
+                        <span className="text-[13px] text-[var(--ink-2)]">Email visibility</span>
+                        <div className="flex items-center gap-[12px]">
+                          <span className="text-[12px] font-[600] text-[var(--ink-2)]">{!isEmailPrivate ? 'Yes' : 'No'}</span>
+                          <button 
+                            onClick={() => setIsEmailPrivate(!isEmailPrivate)}
+                            className={`w-[44px] h-[24px] flex items-center rounded-full p-[2px] transition-colors duration-300 ease-in-out cursor-pointer ${!isEmailPrivate ? 'bg-[var(--teal)]' : 'bg-[var(--ink-3)]/20 shadow-inner'}`}
+                            onMouseEnter={() => setIsHovering(true)}
+                            onMouseLeave={() => setIsHovering(false)}
+                          >
+                            <motion.div
+                              layout
+                              transition={{ type: "spring", stiffness: 700, damping: 30 }}
+                              className={`h-[20px] w-[20px] bg-white rounded-full shadow-sm ${!isEmailPrivate ? 'ml-auto' : 'mr-auto'}`}
+                            />
+                          </button>
+                        </div>
+                      </div>
                     </div>
-                 </motion.div>
+                 </div>
 
                  {/* PRIVACY SECTION */}
-                 <motion.div 
-                   whileHover={{ 
-                     y: -12, 
-                     scale: 1.02,
-                     rotateX: 2,
-                     rotateY: -2,
-                     transition: { duration: 0.3, ease: "easeOut" }
-                   }}
-                   style={{ perspective: 1000 }}
-                   className="bg-white/40 backdrop-blur-md border border-white/60 p-[32px] rounded-[8px] flex flex-col gap-[24px] shadow-sm hover:shadow-[0_20px_40px_rgba(0,0,0,0.12)] transition-all"
-                 >
-                    <div className="flex items-center gap-[12px] pb-[16px] border-b border-white/40">
+                 <div className="bg-white/40 backdrop-blur-md border border-white/60 p-[32px] rounded-[8px] flex flex-col gap-[24px] shadow-sm hover:shadow-[0_20px_40px_rgba(0,0,0,0.08)] hover:-translate-y-1 transition-all duration-300">
+                    <div className="flex items-center gap-[12px] pb-[16px] border-b border-[var(--border-light)]">
                       <i className="fa-solid fa-shield-halved text-[20px] text-[var(--teal)]"></i>
                       <h3 className="font-[600] text-[16px] text-[var(--ink)]">Data & Privacy</h3>
                     </div>
                     <div className="space-y-[16px]">
                       <div className="flex justify-between items-center">
                         <span className="text-[13px] text-[var(--ink-2)]">Automatic history saving</span>
-                        <div className="w-[32px] h-[18px] bg-[var(--teal)] rounded-full relative"><div className="absolute right-[2px] top-[2px] w-[14px] h-[14px] bg-white rounded-full shadow-sm"></div></div>
+                        <button 
+                          onClick={() => setIsHistorySaving(!isHistorySaving)}
+                          className={`w-[44px] h-[24px] flex items-center rounded-full p-[2px] transition-colors duration-300 ease-in-out cursor-pointer ${isHistorySaving ? 'bg-[var(--teal)]' : 'bg-[var(--ink-3)]/20 shadow-inner'}`}
+                        >
+                          <motion.div
+                            layout
+                            transition={{ type: "spring", stiffness: 700, damping: 30 }}
+                            className={`h-[20px] w-[20px] bg-white rounded-full shadow-sm ${isHistorySaving ? 'ml-auto' : 'mr-auto'}`}
+                          />
+                        </button>
                       </div>
-                      <div className="flex justify-between items-center">
-                        <span className="text-[13px] text-[var(--ink-2)]">Anonymous data training</span>
-                        <div className="w-[32px] h-[18px] bg-[var(--ink-3)]/20 rounded-full relative"><div className="absolute left-[2px] top-[2px] w-[14px] h-[14px] bg-white rounded-full shadow-sm"></div></div>
-                      </div>
-                      <button 
-                        className="w-full py-[10px] border border-red-500/20 text-red-500 text-[12px] font-[600] rounded-[4px] hover:bg-red-500/5 transition-colors"
-                        onMouseEnter={() => setIsHovering(true)}
-                        onMouseLeave={() => setIsHovering(false)}
-                      >
-                        Clear History
-                      </button>
                     </div>
-                 </motion.div>
+                  </div>
 
                  {/* APP SETTINGS */}
-                 <motion.div 
-                   whileHover={{ 
-                     y: -12, 
-                     scale: 1.02,
-                     rotateX: -2,
-                     rotateY: 2,
-                     transition: { duration: 0.3, ease: "easeOut" }
-                   }}
-                   style={{ perspective: 1000 }}
-                   className="bg-white/40 backdrop-blur-md border border-white/60 p-[32px] rounded-[8px] flex flex-col gap-[24px] shadow-sm hover:shadow-[0_20px_40px_rgba(0,0,0,0.12)] transition-all"
-                 >
-                    <div className="flex items-center gap-[12px] pb-[16px] border-b border-white/40">
+                 <div className="bg-white/40 backdrop-blur-md border border-white/60 p-[32px] rounded-[8px] flex flex-col gap-[24px] shadow-sm hover:shadow-[0_20px_40px_rgba(0,0,0,0.08)] hover:-translate-y-1 transition-all duration-300">
+                    <div className="flex items-center gap-[12px] pb-[16px] border-b border-[var(--border-light)]">
                       <i className="fa-solid fa-sliders text-[20px] text-[var(--teal)]"></i>
                       <h3 className="font-[600] text-[16px] text-[var(--ink)]">App Features</h3>
                     </div>
@@ -1066,52 +1255,53 @@ export default function Dashboard() {
                         <span className="text-[11px] font-[500] text-[var(--ink-3)] italic">Standard Mode</span>
                       </div>
                       <div className="flex justify-between items-center">
-                        <span className="text-[13px] text-[var(--ink-2)]">Notification warnings</span>
-                        <div className="w-[32px] h-[18px] bg-[var(--teal)] rounded-full relative"><div className="absolute right-[2px] top-[2px] w-[14px] h-[14px] bg-white rounded-full shadow-sm"></div></div>
-                      </div>
-                      <div className="flex justify-between items-center">
-                        <span className="text-[13px] text-[var(--ink-2)]">Dark Mode</span>
-                        <div className="w-[32px] h-[18px] bg-[var(--ink-3)]/20 rounded-full relative"><div className="absolute left-[2px] top-[2px] w-[14px] h-[14px] bg-white rounded-full shadow-sm"></div></div>
+                        <span className="text-[13px] text-[var(--ink-2)]">Notifications</span>
+                        <button 
+                          onClick={() => setIsNotifications(!isNotifications)}
+                          className={`w-[44px] h-[24px] flex items-center rounded-full p-[2px] transition-colors duration-300 ease-in-out cursor-pointer ${isNotifications ? 'bg-[var(--teal)]' : 'bg-[var(--ink-3)]/20 shadow-inner'}`}
+                        >
+                          <motion.div
+                            layout
+                            transition={{ type: "spring", stiffness: 700, damping: 30 }}
+                            className={`h-[20px] w-[20px] bg-white rounded-full shadow-sm ${isNotifications ? 'ml-auto' : 'mr-auto'}`}
+                          />
+                        </button>
                       </div>
                     </div>
-                 </motion.div>
-
+                 </div>
+ 
                  {/* SUPPORT SECTION */}
-                 <motion.div 
-                   whileHover={{ 
-                     y: -12, 
-                     scale: 1.02,
-                     rotateX: -2,
-                     rotateY: -2,
-                     transition: { duration: 0.3, ease: "easeOut" }
-                   }}
-                   style={{ perspective: 1000 }}
-                   className="bg-white/40 backdrop-blur-md border border-white/60 p-[32px] rounded-[8px] flex flex-col gap-[24px] shadow-sm hover:shadow-[0_20px_40px_rgba(0,0,0,0.12)] transition-all"
-                 >
-                    <div className="flex items-center gap-[12px] pb-[16px] border-b border-white/40">
+                 <div className="bg-white/40 backdrop-blur-md border border-white/60 p-[32px] rounded-[8px] flex flex-col gap-[24px] shadow-sm hover:shadow-[0_20px_40px_rgba(0,0,0,0.08)] hover:-translate-y-1 transition-all duration-300">
+                    <div className="flex items-center gap-[12px] pb-[16px] border-b border-[var(--border-light)]">
                       <i className="fa-solid fa-headset text-[20px] text-[var(--teal)]"></i>
                       <h3 className="font-[600] text-[16px] text-[var(--ink)]">Support & Feedback</h3>
                     </div>
                     <div className="space-y-[12px]">
                       <a 
-                        href="mailto:support@derma-ai.com"
-                        className="flex items-center justify-between p-[12px] bg-white/30 rounded-[6px] hover:bg-white/50 transition-all text-[13px]"
+                        href="https://mail.google.com/mail/?view=cm&fs=1&to=shnusair@gmail.com&su=Support%20Request"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center justify-between p-[12px] bg-white/30 backdrop-blur shadow-sm rounded-[6px] hover:bg-white/50 border border-white/60 transition-all text-[13px]"
                         onMouseEnter={() => setIsHovering(true)}
                         onMouseLeave={() => setIsHovering(false)}
                       >
                         <span className="text-[var(--ink)]">Contact Support</span>
                         <i className="fa-solid fa-envelope text-[var(--ink-3)] text-[12px]"></i>
                       </a>
-                      <button 
-                        className="w-full flex items-center justify-between p-[12px] bg-white/30 rounded-[6px] hover:bg-white/50 transition-all text-[13px]"
+                      <a 
+                        href="https://mail.google.com/mail/?view=cm&fs=1&to=shnusair@gmail.com&su=Feedback"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center justify-between p-[12px] bg-white/30 backdrop-blur shadow-sm rounded-[6px] hover:bg-white/50 border border-white/60 transition-all text-[13px]"
                         onMouseEnter={() => setIsHovering(true)}
                         onMouseLeave={() => setIsHovering(false)}
                       >
                         <span className="text-[var(--ink)]">Submit Feedback</span>
                         <i className="fa-solid fa-comment-dots text-[var(--ink-3)] text-[12px]"></i>
-                      </button>
+                      </a>
                       <button 
-                        className="w-full flex items-center justify-between p-[12px] bg-white/30 rounded-[6px] hover:bg-white/50 transition-all text-[13px]"
+                        onClick={() => setShowTOS(true)}
+                        className="w-full flex items-center justify-between p-[12px] bg-white/30 backdrop-blur shadow-sm rounded-[6px] hover:bg-white/50 border border-white/60 transition-all text-[13px]"
                         onMouseEnter={() => setIsHovering(true)}
                         onMouseLeave={() => setIsHovering(false)}
                       >
@@ -1119,16 +1309,48 @@ export default function Dashboard() {
                         <i className="fa-solid fa-file-contract text-[var(--ink-3)] text-[12px]"></i>
                       </button>
                     </div>
-                 </motion.div>
+                 </div>
                </div>
-
-               <div className="mt-[64px] pb-[64px] text-center border-t border-white/20 pt-[32px]">
+ 
+               <div className="mt-[64px] pb-[64px] text-center border-t border-[var(--border-light)] pt-[32px]">
                  <p className="text-[12px] text-[var(--ink-3)] font-[400] font-[var(--font-body)]">Derma-AI Version 1.0.4 • Build 8292</p>
                </div>
             </motion.div>
           )}
         </main>
       </div>
+
+      {showTOS && (
+        <div className="fixed inset-0 z-[2000] flex justify-center p-[20px] overflow-y-auto bg-black/50 backdrop-blur-sm">
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white max-w-2xl w-full p-[32px] rounded-[12px] shadow-2xl relative my-auto h-fit max-h-[80vh] flex flex-col"
+          >
+            <button 
+              onClick={() => setShowTOS(false)}
+              className="absolute top-[24px] right-[24px] text-gray-400 hover:text-gray-800 transition-colors"
+            >
+              <i className="fa-solid fa-xmark text-[20px]"></i>
+            </button>
+            <h2 className="text-[24px] font-[600] mb-[24px] text-gray-900 border-b border-gray-100 pb-[16px]">Terms of Service</h2>
+            <div className="overflow-y-auto pr-[8px] text-gray-600 space-y-[16px] text-[14px] scrollbar-thin scrollbar-thumb-gray-200">
+              <p><strong>1. Acceptance of Terms</strong><br/>By accessing or using our software, you agree to be bound by these Terms of Service. If you do not agree to all the terms and conditions, you may not access the service.</p>
+              <p><strong>2. Description of Service</strong><br/>The service provides automated, AI-assisted health assessments. These are for informational purposes only and do NOT constitute professional medical advice, diagnosis, or treatment. Always consult with a qualified specialist regarding any health concern.</p>
+              <p><strong>3. Disclaimer of Warranties</strong><br/>The software is provided "as is" and "as available". We explicitly disclaim all warranties of any kind, whether express, implied, or statutory, including warranties of merchantability and fitness for a particular purpose.</p>
+              <p><strong>4. Limitation of Liability</strong><br/>In no event shall the developers be liable for any indirect, incidental, special, consequential, or punitive damages arising out of your use of the service. You use this software entirely at your own risk.</p>
+            </div>
+            <div className="mt-[24px] pt-[24px] border-t border-gray-100 flex justify-end">
+              <button 
+                onClick={() => setShowTOS(false)}
+                className="bg-[var(--teal)] text-white px-[24px] py-[10px] rounded-[6px] font-[600] hover:bg-opacity-90 transition-colors shadow-sm"
+              >
+                I Understand
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
     </>
   );
 }

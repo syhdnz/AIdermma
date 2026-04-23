@@ -1,10 +1,28 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 
+import { motion } from 'motion/react';
+
 export default function LandingPage() {
   const [scrolled, setScrolled] = useState(false);
   const [cursorPos, setCursorPos] = useState({ x: -100, y: -100 });
   const [isHovering, setIsHovering] = useState(false);
+  const [isInitialLoading, setIsInitialLoading] = useState(true);
+  const [loadingProgress, setLoadingProgress] = useState(0);
+
+  useEffect(() => {
+    let progress = 0;
+    const interval = setInterval(() => {
+      progress += Math.floor(Math.random() * 15) + 5;
+      if (progress >= 100) {
+        progress = 100;
+        clearInterval(interval);
+        setTimeout(() => setIsInitialLoading(false), 600);
+      }
+      setLoadingProgress(progress);
+    }, 150);
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     const handleScroll = () => {
@@ -69,6 +87,35 @@ export default function LandingPage() {
 
   return (
     <>
+      <motion.div 
+        initial={{ y: 0 }}
+        animate={{ y: isInitialLoading ? 0 : '-100%' }}
+        transition={{ duration: 0.8, ease: [0.76, 0, 0.24, 1] }}
+        className="fixed inset-0 z-[9999] bg-[var(--bg-dark)] flex flex-col items-center justify-center font-[var(--font-display)]"
+        style={{ pointerEvents: isInitialLoading ? 'auto' : 'none' }}
+      >
+        <div className="absolute top-[50%] left-[50%] translate-x-[-50%] translate-y-[-50%] flex flex-col items-center text-center w-full px-[20px]">
+          <h1 className="text-[var(--paper-text)] text-[48px] md:text-[72px] font-[800] leading-[1.1] tracking-tight mb-[16px]">
+            Derma-<span className="text-[var(--teal-light)] italic font-[400] tracking-normal">Ai</span>
+          </h1>
+          <p className="text-[var(--teal-light)]/80 font-[var(--font-body)] text-[16px] md:text-[20px] font-[400] mb-[48px]">
+            Your chaos, our clarity.
+          </p>
+          <div className="flex flex-col items-center w-full max-w-[300px]">
+            <div className="w-full flex justify-between text-[var(--paper-muted)] font-[var(--font-body)] text-[11px] tracking-[0.2em] uppercase mb-[12px]">
+              <span>Initializing</span>
+              <span className="tabular-nums text-[var(--teal-light)]">{loadingProgress}%</span>
+            </div>
+            <div className="w-full h-[3px] bg-[rgba(255,255,255,0.1)] overflow-hidden relative rounded-full">
+              <motion.div 
+                className="absolute top-0 left-0 bottom-0 bg-[var(--teal-light)] transition-all duration-200 ease-out rounded-full"
+                style={{ width: `${loadingProgress}%` }}
+              />
+            </div>
+          </div>
+        </div>
+      </motion.div>
+
       <div 
         className={`custom-cursor hidden md:block ${isHovering ? 'hovering' : ''}`}
         style={{ left: cursorPos.x, top: cursorPos.y }}
@@ -177,7 +224,7 @@ export default function LandingPage() {
              Access to specialized skin care is severely limited in India, leading to delayed diagnoses and dangerous self-management.
            </p>
 
-           <div className="grid grid-cols-1 md:grid-cols-5 gap-0 mt-[80px] bg-[var(--bg-paper)] border border-[var(--border-light)] border-t-0 border-l-0 reveal stagger-3">
+           <div className="grid grid-cols-1 md:grid-cols-5 gap-[1px] mt-[80px] bg-[var(--border-light)]/20 rounded-[12px] overflow-hidden reveal stagger-3 border border-white/20 shadow-2xl">
               {[
                 { i: 'fa-chart-line', t: 'High Burden', d: 'Eczema, psoriasis, fungal infections, early melanoma — widespread and growing.' },
                 { i: 'fa-clock', t: 'Limited Access', d: 'Critical shortage of dermatologists. Most patients wait months.' },
@@ -185,10 +232,10 @@ export default function LandingPage() {
                 { i: 'fa-question-circle', t: 'Unclear Urgency', d: "Patients can't tell if they need care today, this week, or urgently." },
                 { i: 'fa-robot', t: 'Need for Scale', d: 'An AI triage solution can reach millions beyond specialist reach.' }
               ].map((card, idx) => (
-                 <div key={idx} className="bg-[var(--bg-base)] border-l border-t border-[var(--border-light)] p-[36px_28px] transition-all duration-300 hover:bg-[var(--bg-dark)] group" style={{ borderTop: '3px solid var(--coral)' }} onMouseEnter={(e) => { (e.currentTarget.style.borderTopColor = 'var(--teal)') }} onMouseLeave={(e) => { (e.currentTarget.style.borderTopColor = 'var(--coral)') }}>
-                    <i className={`fa-solid ${card.i} text-[20px] text-[var(--coral)] mb-[28px] group-hover:text-[var(--teal-light)] transition-colors duration-300`} />
-                    <div className="t-card-title text-[var(--ink)] mb-[12px] group-hover:text-[var(--paper-text)] transition-colors duration-300">{card.t}</div>
-                    <div className="t-body text-[var(--ink-2)] group-hover:text-[var(--paper-muted)] transition-colors duration-300">{card.d}</div>
+                 <div key={idx} className="bg-white/40 backdrop-blur-xl p-[36px_28px] transition-all duration-300 hover:bg-white/60 group" style={{ borderTop: '3px solid var(--teal)' }} onMouseEnter={(e) => { (e.currentTarget.style.borderTopColor = 'var(--coral)') }} onMouseLeave={(e) => { (e.currentTarget.style.borderTopColor = 'var(--teal)') }}>
+                    <i className={`fa-solid ${card.i} text-[20px] text-[var(--teal)] mb-[28px] group-hover:text-[var(--coral)] transition-colors duration-300`} />
+                    <div className="t-card-title text-[var(--ink)] mb-[12px] transition-colors duration-300">{card.t}</div>
+                    <div className="t-body text-[var(--ink-2)] transition-colors duration-300">{card.d}</div>
                  </div>
               ))}
            </div>
@@ -268,19 +315,19 @@ export default function LandingPage() {
               </div>
 
               <div className="lg:col-span-7 flex flex-col gap-[2px]">
-                 {[
+                  {[
                    { t: 'Multi-photo progression', d: 'Track your condition across multiple sessions' },
                    { t: 'Differential diagnosis', d: 'Top 3 possible conditions with distinguishing features' },
                    { t: 'Visit prep guide', d: 'Know exactly what photos and history to bring your doctor' },
                    { t: 'Confidence score', d: 'Uncertainty percentage shown on every single result' }
                  ].map((feat, idx) => (
-                    <div key={idx} className={`flex gap-[20px] items-start p-[28px] bg-[var(--bg-base)] border border-[var(--border-light)] transition-all duration-300 hover:bg-[var(--bg-dark)] hover:border-transparent group reveal stagger-${idx % 4 + 1}`}>
-                       <div className="w-[38px] h-[38px] rounded-full flex-shrink-0 bg-[var(--teal-faint)] border border-[var(--teal-border)] flex items-center justify-center group-hover:bg-[rgba(42,155,130,0.2)] transition-colors">
+                    <div key={idx} className={`flex gap-[20px] items-start p-[28px] bg-white/40 mb-[16px] rounded-[12px] backdrop-blur-xl border border-white/60 shadow-lg transition-all duration-300 hover:bg-white/60 hover:shadow-2xl group reveal stagger-${idx % 4 + 1}`}>
+                       <div className="w-[38px] h-[38px] rounded-full flex-shrink-0 bg-[var(--teal)]/10 border border-[var(--teal)]/30 flex items-center justify-center group-hover:bg-[var(--teal)]/20 transition-colors">
                           <i className="fa-solid fa-check text-[13px] text-[var(--teal)]" />
                        </div>
                        <div>
-                          <div className="font-[600] font-[var(--font-display)] text-[19px] text-[var(--ink)] group-hover:text-[var(--paper-text)] transition-colors">{feat.t}</div>
-                          <div className="t-body text-[14px] text-[var(--ink-2)] mt-[4px] group-hover:text-[var(--paper-muted)] transition-colors">{feat.d}</div>
+                          <div className="font-[600] font-[var(--font-display)] text-[19px] text-[var(--ink)] transition-colors">{feat.t}</div>
+                          <div className="t-body text-[14px] text-[var(--ink-2)] mt-[4px] transition-colors">{feat.d}</div>
                        </div>
                     </div>
                  ))}
@@ -332,15 +379,15 @@ export default function LandingPage() {
              <span className="italic text-[var(--teal-light)]">access exists.</span>
            </h2>
 
-           <div className="mt-[64px] bg-[var(--border-dark)] gap-[1px] grid grid-cols-1 md:grid-cols-2 reveal stagger-2">
+           <div className="mt-[64px] rounded-[16px] overflow-hidden shadow-2xl border border-white/10 gap-[1px] grid grid-cols-1 md:grid-cols-2 reveal stagger-2">
               {[
                 { n: '01', t: 'Earlier Care', d: 'Conditions caught before they escalate' },
                 { n: '02', t: 'Safer Self-Care', d: 'Evidence-based guidance, not guesswork' },
                 { n: '03', t: 'Specialist Prep', d: 'Better informed patients, more efficient consults' },
                 { n: '04', t: 'India-Wide', d: 'Scalable screening without specialist bottlenecks' }
               ].map((card, idx) => (
-                 <div key={idx} className="bg-[var(--bg-dark-2)] p-[48px_40px] hover:bg-[var(--bg-dark-3)] transition-colors duration-300">
-                    <div className="font-[700] font-[var(--font-display)] text-[56px] text-[var(--teal-light)] mb-[16px]">{card.n}</div>
+                 <div key={idx} className="bg-[rgba(255,255,255,0.05)] backdrop-blur-md p-[48px_40px] hover:bg-[rgba(255,255,255,0.1)] transition-colors border-b border-r border-white/5 duration-300">
+                    <div className="font-[700] font-[var(--font-display)] text-[56px] text-[var(--teal-light)] mb-[16px] mix-blend-screen">{card.n}</div>
                     <div className="font-[500] font-[var(--font-body)] text-[18px] text-[var(--paper-text)]">{card.t}</div>
                     <div className="font-[300] font-[var(--font-body)] text-[14px] text-[var(--paper-muted)] mt-[8px]">{card.d}</div>
                  </div>

@@ -25,9 +25,11 @@ CREATE TABLE IF NOT EXISTS public.scans (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
--- Note: If the table already exists, run these commands:
--- ALTER TABLE public.scans ALTER COLUMN user_id TYPE TEXT;
--- ALTER TABLE public.scans ADD COLUMN IF NOT EXISTS analysis JSONB;
+-- Fix if table exists and has UUID type:
+-- DROP POLICY IF EXISTS "Users can view their own scans." ON public.scans;
+-- DROP POLICY IF EXISTS "Users can insert their own scans." ON public.scans;
+-- DROP POLICY IF EXISTS "Users can delete their own scans." ON public.scans;
+-- ALTER TABLE public.scans ALTER COLUMN user_id TYPE TEXT USING user_id::text;
 -- ALTER TABLE public.scans DROP CONSTRAINT IF EXISTS scans_user_id_fkey;
 
 -- 4. Enable RLS on scans
@@ -38,20 +40,21 @@ CREATE POLICY "Public profiles are viewable by everyone." ON public.profiles
   FOR SELECT USING (true);
 
 CREATE POLICY "Users can insert their own profile." ON public.profiles
-  FOR INSERT WITH CHECK (auth.uid() = id);
+  FOR INSERT WITH CHECK (auth.uid()::text = id::text);
 
 CREATE POLICY "Users can update own profile." ON public.profiles
-  FOR UPDATE USING (auth.uid() = id);
+  FOR UPDATE USING (auth.uid()::text = id::text);
 
 -- 6. Policies for scans
+-- Note: auth.uid()::text is used because user_id is type TEXT
 CREATE POLICY "Users can view their own scans." ON public.scans
-  FOR SELECT USING (auth.uid() = user_id);
+  FOR SELECT USING (auth.uid()::text = user_id);
 
 CREATE POLICY "Users can insert their own scans." ON public.scans
-  FOR INSERT WITH CHECK (auth.uid() = user_id);
+  FOR INSERT WITH CHECK (auth.uid()::text = user_id);
 
 CREATE POLICY "Users can delete their own scans." ON public.scans
-  FOR DELETE USING (auth.uid() = user_id);
+  FOR DELETE USING (auth.uid()::text = user_id);
 
 -- 7. STORAGE SETUP
 -- Create the scans bucket if it doesn't exist
