@@ -29,6 +29,8 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [isScanning, setIsScanning] = useState(false);
   const [scanStep, setScanStep] = useState<'idle' | 'uploading' | 'analyzing' | 'saving'>('idle');
+  const [scanResult, setScanResult] = useState<{ condition: string; urgency: string; confidence: string } | null>(null);
+  const [showResultModal, setShowResultModal] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [scans, setScans] = useState<ScanRecord[]>([]);
   const [cursorPos, setCursorPos] = useState({ x: -100, y: -100 });
@@ -154,32 +156,32 @@ export default function Dashboard() {
 
       if (!response.text) throw new Error("AI failed to provide an analysis result.");
       const result = JSON.parse(response.text);
+      setScanResult(result);
 
-      // 3. Save results to Firestore (Handle storage upload in parallel or reliably)
-      setScanStep('saving');
-      
-      let imageUrl = '';
+      // Show result immediately!
+      setIsScanning(false);
+      setShowResultModal(true);
+      setScanStep('idle');
+
+      // 3. Save results to Firestore in the background
       try {
+        let imageUrl = '';
         const storageRef = ref(storage, `scans/${user.uid}/${Date.now()}_${file.name}`);
         await uploadBytes(storageRef, file);
         imageUrl = await getDownloadURL(storageRef);
-      } catch (storageErr) {
-        console.warn("Storage upload failed, using preview URL for now", storageErr);
-        // Fallback or handle differently if storage is not set up
+
+        await addDoc(collection(db, `users/${user.uid}/scans`), {
+          userId: user.uid,
+          imageUrl: imageUrl || '',
+          condition: result.condition,
+          urgency: result.urgency,
+          confidence: result.confidence,
+          createdAt: serverTimestamp()
+        });
+      } catch (saveErr) {
+        console.error("Background save failed:", saveErr);
+        // We don't alert the user here because they already see the results in the modal
       }
-
-      await addDoc(collection(db, `users/${user.uid}/scans`), {
-        userId: user.uid,
-        imageUrl: imageUrl || '',
-        condition: result.condition,
-        urgency: result.urgency,
-        confidence: result.confidence,
-        createdAt: serverTimestamp()
-      });
-
-      setIsScanning(false);
-      setScanStep('idle');
-      setPreviewUrl(null);
       
     } catch (error: any) {
       console.error("Scan failed:", error);
@@ -214,6 +216,75 @@ export default function Dashboard() {
         className={`custom-cursor hidden md:block ${isHovering ? 'hovering' : ''}`}
         style={{ left: cursorPos.x, top: cursorPos.y }}
       />
+
+      {/* RESULT MODAL */}
+      {showResultModal && scanResult && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-[20px]">
+          <motion.div 
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+            className="absolute inset-0 bg-[var(--bg-dark)]/80 backdrop-blur-md" 
+            onClick={() => setShowResultModal(false)}
+          />
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.95, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            className="relative bg-[var(--bg-base)] w-full max-w-[500px] rounded-[4px] p-[48px] shadow-2xl border border-[var(--border-light)]"
+          >
+            <div className="flex justify-between items-start mb-[32px]">
+              <div>
+                <p className="font-[500] font-[var(--font-body)] text-[11px] uppercase tracking-[0.1em] text-[var(--teal)] mb-[8px]">Scan Analysis Complete</p>
+                <h2 className="font-[600] font-[var(--font-display)] text-[32px] text-[var(--ink)] leading-[1.1]">Findings</h2>
+              </div>
+              <button 
+                onClick={() => setShowResultModal(false)}
+                className="w-[32px] h-[32px] rounded-full border border-[var(--border-light)] flex items-center justify-center text-[var(--ink-3)] hover:text-[var(--ink)] transition-colors"
+                onMouseEnter={() => setIsHovering(true)}
+                onMouseLeave={() => setIsHovering(false)}
+              >
+                <i className="fa-solid fa-xmark"></i>
+              </button>
+            </div>
+
+            <div className="space-y-[24px] mb-[40px]">
+              <div>
+                <p className="font-[500] font-[var(--font-body)] text-[11px] uppercase tracking-[0.08em] text-[var(--ink-3)] mb-[4px]">Condition</p>
+                <p className="font-[400] font-[var(--font-body)] text-[20px] text-[var(--ink)]">{scanResult.condition}</p>
+              </div>
+              
+              <div className="grid grid-cols-2 gap-[24px]">
+                <div>
+                  <p className="font-[500] font-[var(--font-body)] text-[11px] uppercase tracking-[0.08em] text-[var(--ink-3)] mb-[4px]">Urgency</p>
+                  <span className={`inline-flex items-center px-[12px] py-[4px] rounded-full font-[600] font-[var(--font-body)] text-[11px] uppercase tracking-[0.05em] 
+                    ${scanResult.urgency?.toLowerCase() === 'high' ? 'bg-red-500/10 text-red-700' : 
+                      scanResult.urgency?.toLowerCase() === 'medium' ? 'bg-orange-500/10 text-orange-700' : 
+                      'bg-[var(--teal)]/10 text-[var(--teal)]'}`}>
+                    {scanResult.urgency}
+                  </span>
+                </div>
+                <div>
+                  <p className="font-[500] font-[var(--font-body)] text-[11px] uppercase tracking-[0.08em] text-[var(--ink-3)] mb-[4px]">AI Confidence</p>
+                  <p className="font-[600] font-[var(--font-body)] text-[18px] text-[var(--ink)]">{scanResult.confidence}</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-[20px] bg-[var(--bg-paper)] rounded-[2px] border border-[var(--border-light)] mb-[32px]">
+              <p className="font-[400] font-[var(--font-body)] text-[12px] text-[var(--ink-2)] italic leading-[1.6]">
+                "Note: This analysis is for informational purposes only. Please consult a qualified dermatologist for a formal diagnosis and treatment plan."
+              </p>
+            </div>
+
+            <button 
+              onClick={() => setShowResultModal(false)}
+              className="btn-primary w-full"
+              onMouseEnter={() => setIsHovering(true)}
+              onMouseLeave={() => setIsHovering(false)}
+            >
+              Done
+            </button>
+          </motion.div>
+        </div>
+      )}
       
       <div className="flex min-h-screen bg-[var(--bg-base)] relative overflow-hidden">
         {/* Subtle Liquid Glass / Blob Background */}
